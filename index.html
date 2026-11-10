@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Live Recorder</title>
+<style>
+  /* Layout: single-screen studio — preview stage up top, source + record controls below */
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel-2:#1c232d; --line:#2a323d;
+    --fg:#e8edf3; --muted:#9aa7b4; --accent:#4b9fff; --rec:#ff4d4f; --ok:#37d67a;
+    --radius:14px; --gap:14px;
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+    --bg:#f4f6f9; --panel:#ffffff; --panel-2:#eef1f5; --line:#dde3ea;
+    --fg:#111820; --muted:#5c6773; --accent:#1769e0; color-scheme:light;
+  }}
+  :root[data-theme="light"]{
+    --bg:#f4f6f9; --panel:#ffffff; --panel-2:#eef1f5; --line:#dde3ea;
+    --fg:#111820; --muted:#5c6773; --accent:#1769e0; color-scheme:light;
+  }
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--fg); font-family:var(--font);
+    min-height:100dvh;
+    padding:max(16px,env(safe-area-inset-left)) ;
+    padding-left:max(16px,env(safe-area-inset-left));
+    padding-right:max(16px,env(safe-area-inset-right));
+    padding-top:max(16px,env(safe-area-inset-top));
+    padding-bottom:max(20px,env(safe-area-inset-bottom));
+  }
+  .wrap{max-width:900px;margin:0 auto;display:flex;flex-direction:column;gap:var(--gap)}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  h1{font-size:19px;margin:0;letter-spacing:.2px;display:flex;align-items:center;gap:9px}
+  .dot-logo{width:11px;height:11px;border-radius:50%;background:var(--accent)}
+  .note{font-size:12.5px;color:var(--muted);line-height:1.5;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+  .note b{color:var(--fg)}
+
+  .stage{position:relative;background:#000;border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;aspect-ratio:16/9;width:100%;display:flex;align-items:center;justify-content:center}
+  .stage canvas{width:100%;height:100%;object-fit:contain;display:block}
+  .stage .empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:8px;color:#8893a0;font-size:14px;text-align:center;padding:20px}
+  .empty svg{width:40px;height:40px;opacity:.6}
+
+  /* REC indicator — always visible while recording (transparency by design) */
+  .rec-badge{position:absolute;top:12px;left:12px;display:none;align-items:center;gap:8px;
+    background:rgba(0,0,0,.6);backdrop-filter:blur(4px);border-radius:999px;padding:6px 12px 6px 10px;
+    font-size:13px;font-weight:600;color:#fff;letter-spacing:.5px}
+  .rec-badge.on{display:flex}
+  .rec-badge .pulse{width:11px;height:11px;border-radius:50%;background:var(--rec);
+    box-shadow:0 0 0 0 rgba(255,77,79,.7);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,77,79,.7)}70%{box-shadow:0 0 0 10px rgba(255,77,79,0)}100%{box-shadow:0 0 0 0 rgba(255,77,79,0)}}
+  @media (prefers-reduced-motion:reduce){.rec-badge .pulse{animation:none}}
+  .meter-wrap{position:absolute;bottom:12px;left:12px;right:12px;height:6px;border-radius:3px;
+    background:rgba(255,255,255,.15);overflow:hidden;display:none}
+  .meter-wrap.on{display:block}
+  .meter{height:100%;width:0;background:var(--ok);transition:width .06s linear}
+
+  .sources{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--gap)}
+  @media (max-width:520px){.sources{grid-template-columns:1fr}}
+  .src{appearance:none;cursor:pointer;text-align:left;background:var(--panel);color:var(--fg);
+    border:1px solid var(--line);border-radius:12px;padding:13px 14px;display:flex;align-items:center;
+    gap:11px;font-size:14px;font-family:inherit;transition:border-color .15s,background .15s}
+  .src:hover{border-color:var(--accent)}
+  .src .ico{width:34px;height:34px;flex:none;border-radius:9px;background:var(--panel-2);
+    display:flex;align-items:center;justify-content:center}
+  .src .ico svg{width:19px;height:19px;color:var(--muted)}
+  .src .t{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .src .t b{font-weight:600}
+  .src .t span{font-size:11.5px;color:var(--muted)}
+  .src.active{border-color:var(--accent);background:var(--panel-2)}
+  .src.active .ico{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+  .src.active .ico svg{color:var(--accent)}
+  .src .state{margin-left:auto;font-size:11px;font-weight:600;color:var(--muted)}
+  .src.active .state{color:var(--ok)}
+
+  .bar{display:flex;align-items:center;gap:var(--gap);flex-wrap:wrap;
+    background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .btn{appearance:none;cursor:pointer;font-family:inherit;font-size:14px;font-weight:600;
+    border-radius:10px;padding:11px 18px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.rec{background:var(--rec);border-color:var(--rec);color:#fff}
+  .btn.stop{background:var(--panel-2)}
+  .btn.ghost{background:transparent}
+  .timer{font-variant-numeric:tabular-nums;font-size:16px;font-weight:700;letter-spacing:1px;min-width:72px}
+  .timer.live{color:var(--rec)}
+  .status{font-size:12.5px;color:var(--muted);margin-left:auto}
+
+  .result{display:none;flex-direction:column;gap:10px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;padding:14px}
+  .result.on{display:flex}
+  .result video{width:100%;border-radius:10px;background:#000;max-height:360px}
+  .result .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .result .fname{font-size:12.5px;color:var(--muted);word-break:break-all}
+  a.btn{text-decoration:none;display:inline-block}
+  .err{display:none;background:color-mix(in srgb,var(--rec) 14%,var(--panel));
+    border:1px solid color-mix(in srgb,var(--rec) 45%,var(--line));color:var(--fg);
+    border-radius:10px;padding:10px 13px;font-size:13px}
+  .err.on{display:block}
+  select{font-family:inherit;font-size:13px;background:var(--panel-2);color:var(--fg);
+    border:1px solid var(--line);border-radius:8px;padding:7px 9px}
+  label.inl{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:7px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span class="dot-logo"></span> Live Recorder</h1>
+    <label class="inl">Quality
+      <select id="q">
+        <option value="1080">1080p</option>
+        <option value="720" selected>720p</option>
+        <option value="native">Native</option>
+      </select>
+    </label>
+  </header>
+
+  <div class="note">Records to <b>your own device</b> only — nothing is uploaded. A red <b>REC</b> badge stays on screen while recording. Turn on the sources you want, then press Record. Best in Chrome/Edge.</div>
+
+  <div class="err" id="err"></div>
+
+  <div class="stage">
+    <canvas id="cv" width="1280" height="720"></canvas>
+    <div class="empty" id="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="15" height="14" rx="2"/><path d="M17 10l5-3v10l-5-3"/></svg>
+      Turn on Camera or Screen to see a preview
+    </div>
+    <div class="rec-badge" id="badge"><span class="pulse"></span> REC <span id="btime">00:00</span></div>
+    <div class="meter-wrap" id="meterWrap"><div class="meter" id="meter"></div></div>
+  </div>
+
+  <div class="sources">
+    <button class="src" id="sCam" data-src="camera">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></span>
+      <span class="t"><b>Camera</b><span>Webcam video</span></span>
+      <span class="state">Off</span>
+    </button>
+    <button class="src" id="sMic" data-src="mic">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v4"/></svg></span>
+      <span class="t"><b>Microphone</b><span>Your audio</span></span>
+      <span class="state">Off</span>
+    </button>
+    <button class="src" id="sScr" data-src="screen">
+      <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+      <span class="t"><b>Screen</b><span>Share + record</span></span>
+      <span class="state">Off</span>
+    </button>
+  </div>
+
+  <div class="bar">
+    <button class="btn rec" id="recBtn">● Record</button>
+    <button class="btn stop" id="stopBtn" disabled>■ Stop</button>
+    <span class="timer" id="timer">00:00</span>
+    <span class="status" id="status">Idle</span>
+  </div>
+
+  <div class="result" id="result">
+    <video id="playback" controls playsinline></video>
+    <div class="row">
+      <a class="btn" id="dl" download>⬇ Download</a>
+      <button class="btn ghost" id="again">Record again</button>
+      <span class="fname" id="fname"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const $=id=>document.getElementById(id);
+  const cv=$("cv"), ctx=cv.getContext("2d");
+  const streams={camera:null,mic:null,screen:null};
+  const vids={camera:document.createElement("video"),screen:document.createElement("video")};
+  for(const k in vids){vids[k].muted=true;vids[k].playsInline=true;}
+  let drawing=false, recorder=null, chunks=[], startT=0, tHandle=null, audioCtx=null, analyser=null, lastURL=null;
+
+  function showErr(m){const e=$("err");e.textContent=m;e.classList.add("on");}
+  function clearErr(){$("err").classList.remove("on");}
+
+  function fmt(s){s=Math.floor(s);const m=String(Math.floor(s/60)).padStart(2,"0");const ss=String(s%60).padStart(2,"0");return m+":"+ss;}
+
+  function anyVideo(){return streams.camera||streams.screen;}
+  function updateEmpty(){$("empty").style.display=anyVideo()?"none":"flex";}
+
+  function targetDims(){
+    const q=$("q").value;
+    if(streams.screen){
+      const t=streams.screen.getVideoTracks()[0].getSettings();
+      let w=t.width||1280,h=t.height||720;
+      if(q==="720"&&h>720){w=Math.round(w*720/h);h=720;}
+      if(q==="1080"&&h>1080){w=Math.round(w*1080/h);h=1080;}
+      return {w:Math.max(2,w|0),h:Math.max(2,h|0)};
+    }
+    if(streams.camera){
+      if(q==="native"){const t=streams.camera.getVideoTracks()[0].getSettings();return {w:t.width||1280,h:t.height||720};}
+      const h=q==="1080"?1080:720;return {w:Math.round(h*16/9),h:h};
+    }
+    return {w:1280,h:720};
+  }
+
+  function draw(){
+    if(!drawing)return;
+    const d=targetDims();
+    if(cv.width!==d.w||cv.height!==d.h){cv.width=d.w;cv.height=d.h;}
+    ctx.fillStyle="#000";ctx.fillRect(0,0,cv.width,cv.height);
+    // main = screen if on, else camera
+    const main= streams.screen?vids.screen : (streams.camera?vids.camera:null);
+    if(main&&main.videoWidth){
+      const r=Math.min(cv.width/main.videoWidth,cv.height/main.videoHeight);
+      const w=main.videoWidth*r,h=main.videoHeight*r;
+      ctx.drawImage(main,(cv.width-w)/2,(cv.height-h)/2,w,h);
+    }
+    // PiP = camera when screen also on
+    if(streams.screen&&streams.camera&&vids.camera.videoWidth){
+      const pw=Math.round(cv.width*0.24), ph=Math.round(pw*vids.camera.videoHeight/vids.camera.videoWidth);
+      const px=cv.width-pw-Math.round(cv.width*0.02), py=cv.height-ph-Math.round(cv.width*0.02);
+      ctx.save();ctx.strokeStyle="rgba(255,255,255,.8)";ctx.lineWidth=Math.max(2,cv.width*0.003);
+      ctx.fillStyle="#000";ctx.fillRect(px,py,pw,ph);
+      ctx.drawImage(vids.camera,px,py,pw,ph);ctx.strokeRect(px,py,pw,ph);ctx.restore();
+    }
+    requestAnimationFrame(draw);
+  }
+  function startDraw(){if(!drawing){drawing=true;requestAnimationFrame(draw);}}
+
+  // audio meter
+  function setupMeter(){
+    const w=$("meterWrap"),m=$("meter");
+    if(!streams.mic){w.classList.remove("on");return;}
+    w.classList.add("on");
+    try{
+      audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+      const src=audioCtx.createMediaStreamSource(streams.mic);
+      analyser=audioCtx.createAnalyser();analyser.fftSize=256;src.connect(analyser);
+      const data=new Uint8Array(analyser.frequencyBinCount);
+      (function tick(){
+        if(!analyser)return;
+        analyser.getByteFrequencyData(data);
+        let sum=0;for(let i=0;i<data.length;i++)sum+=data[i];
+        const lvl=Math.min(100,(sum/data.length)/128*100*1.6);
+        m.style.width=lvl.toFixed(0)+"%";
+        requestAnimationFrame(tick);
+      })();
+    }catch(e){}
+  }
+
+  async function toggle(src,btn){
+    clearErr();
+    if(streams[src]){ // turn off
+      streams[src].getTracks().forEach(t=>t.stop());
+      streams[src]=null;
+      btn.classList.remove("active");btn.querySelector(".state").textContent="Off";
+      if(vids[src]){vids[src].srcObject=null;}
+      if(src==="mic"){analyser=null;$("meterWrap").classList.remove("on");}
+      updateEmpty();
+      return;
+    }
+    try{
+      if(src==="camera"){
+        streams.camera=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080}},audio:false});
+        vids.camera.srcObject=streams.camera;await vids.camera.play().catch(()=>{});
+        startDraw();
+      }else if(src==="mic"){
+        streams.mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+        setupMeter();
+      }else if(src==="screen"){
+        streams.screen=await navigator.mediaDevices.getDisplayMedia({video:{width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},audio:true});
+        vids.screen.srcObject=streams.screen;await vids.screen.play().catch(()=>{});
+        streams.screen.getVideoTracks()[0].addEventListener("ended",()=>{ // user clicked browser "Stop sharing"
+          const b=$("sScr");streams.screen=null;b.classList.remove("active");b.querySelector(".state").textContent="Off";
+          vids.screen.srcObject=null;updateEmpty();
+        });
+        startDraw();
+      }
+      btn.classList.add("active");btn.querySelector(".state").textContent="On";
+      updateEmpty();
+    }catch(e){
+      showErr(label(src)+" not started: "+(e.message||e.name||e));
+    }
+  }
+  function label(s){return s==="mic"?"Microphone":s==="screen"?"Screen":"Camera";}
+
+  function buildRecordStream(){
+    const out=new MediaStream();
+    const haveV=anyVideo();
+    if(haveV){
+      const fps=30;
+      const cs=cv.captureStream(fps);
+      cs.getVideoTracks().forEach(t=>out.addTrack(t));
+    }
+    // mix audio: mic + screen audio
+    const aTracks=[];
+    if(streams.mic)aTracks.push(...streams.mic.getAudioTracks());
+    if(streams.screen)aTracks.push(...streams.screen.getAudioTracks());
+    if(aTracks.length){
+      audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+      const dest=audioCtx.createMediaStreamDestination();
+      const seen=new Set();
+      [streams.mic,streams.screen].forEach(st=>{
+        if(st&&st.getAudioTracks().length){
+          try{const s=audioCtx.createMediaStreamSource(new MediaStream(st.getAudioTracks()));s.connect(dest);}catch(e){}
+        }
+      });
+      dest.stream.getAudioTracks().forEach(t=>out.addTrack(t));
+    }
+    return out.getTracks().length?out:null;
+  }
+
+  function pickMime(){
+    const c=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm","video/mp4"];
+    for(const m of c)if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m;
+    return "";
+  }
+
+  function startRec(){
+    clearErr();
+    if(!anyVideo()&&!streams.mic){showErr("Turn on at least one source (Camera, Screen or Microphone) first.");return;}
+    const stream=buildRecordStream();
+    if(!stream){showErr("Nothing to record.");return;}
+    const mime=pickMime();
+    try{recorder=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:6_000_000}:undefined);}
+    catch(e){showErr("Recorder error: "+e.message);return;}
+    chunks=[];
+    recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};
+    recorder.onstop=finishRec;
+    recorder.start(1000);
+    startT=Date.now();
+    $("badge").classList.add("on");
+    $("recBtn").disabled=true;$("stopBtn").disabled=false;
+    $("result").classList.remove("on");
+    $("timer").classList.add("live");$("status").textContent="Recording…";
+    tHandle=setInterval(()=>{const s=(Date.now()-startT)/1000;$("timer").textContent=fmt(s);$("btime").textContent=fmt(s);},250);
+  }
+
+  function stopRec(){
+    if(recorder&&recorder.state!=="inactive")recorder.stop();
+    clearInterval(tHandle);
+    $("badge").classList.remove("on");
+    $("recBtn").disabled=false;$("stopBtn").disabled=true;
+    $("timer").classList.remove("live");$("status").textContent="Processing…";
+  }
+
+  function finishRec(){
+    const type=(chunks[0]&&chunks[0].type)||"video/webm";
+    const blob=new Blob(chunks,{type});
+    if(lastURL)URL.revokeObjectURL(lastURL);
+    lastURL=URL.createObjectURL(blob);
+    const ext=type.indexOf("mp4")>-1?"mp4":"webm";
+    const name="recording-"+new Date().toISOString().replace(/[:.]/g,"-").slice(0,19)+"."+ext;
+    const pb=$("playback");pb.src=lastURL;
+    const dl=$("dl");dl.href=lastURL;dl.setAttribute("download",name);
+    $("fname").textContent=name+"  ·  "+(blob.size/1048576).toFixed(1)+" MB";
+    $("result").classList.add("on");
+    $("status").textContent="Done — ready to download";
+    $("timer").textContent="00:00";
+  }
+
+  // wire up
+  $("sCam").onclick=()=>toggle("camera",$("sCam"));
+  $("sMic").onclick=()=>toggle("mic",$("sMic"));
+  $("sScr").onclick=()=>toggle("screen",$("sScr"));
+  $("recBtn").onclick=startRec;
+  $("stopBtn").onclick=stopRec;
+  $("again").onclick=()=>{$("result").classList.remove("on");$("status").textContent="Idle";};
+
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    showErr("This browser can't access camera/mic/screen here. Open this page over https or on localhost in Chrome/Edge.");
+  }
+})();
+</script>
+</body>
+</html>
